@@ -138,6 +138,7 @@ export function buildCamoufoxOptions(input: BrowserLaunchInput, selectedOS: Supp
 export function browserContextOptions(input: BrowserLaunchInput): Parameters<Browser["newContext"]>[0] {
   return {
     serviceWorkers: "block",
+    acceptDownloads: true,
     viewport: input.viewport ? {
       width: input.viewport.width,
       height: input.viewport.height,

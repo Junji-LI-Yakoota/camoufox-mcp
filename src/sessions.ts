@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
+import os from "node:os";
 import type { Browser, Response } from "playwright-core";
 import chalk from "chalk";
 import { validateTargetUrl } from "./policy.js";
@@ -188,6 +190,17 @@ export async function handleSessionStart(input: SessionStartToolInput) {
     const requestGuard = await installRequestGuard(context);
     const page = await context.newPage();
     requestGuard.watchPage(page);
+
+    const downloadDir = process.env.CAMOUFOX_MCP_DOWNLOAD_DIR || path.join(os.homedir(), "Downloads");
+    page.on("download", async (download) => {
+      try {
+        const dest = path.join(downloadDir, download.suggestedFilename());
+        await download.saveAs(dest);
+        console.error(chalk.green(`[Camoufox] Download saved: ${dest}`));
+      } catch (downloadError) {
+        console.error(chalk.red(`[Camoufox] Download save failed: ${describeError(downloadError)}`));
+      }
+    });
 
     const id = `sess_${randomUUID()}`;
     const rawUrls = [getProxyServer(effectiveInput.proxy)].filter((rawUrl): rawUrl is string => Boolean(rawUrl));

@@ -10,7 +10,6 @@ export const MAX_SEQUENCE_ACTIONS = 25;
 export const DEFAULT_ACTION_TIMEOUT_MS = 10000;
 export const DEFAULT_WAIT_STRATEGY: WaitStrategy = "domcontentloaded";
 export const DEFAULT_STEALTH_PROFILE: StealthProfile = "normal";
-export const MAX_GUARDED_REQUESTS = 1024;
 export const MAX_EXTRACT_NODES = 50000;
 export const GUARD_SETTLE_MS = 100;
 export const SESSION_CLOSE_GRACE_MS = 5000;
@@ -88,6 +87,12 @@ export const MAX_DIAGNOSTIC_ENTRIES = readBoundedInteger("CAMOUFOX_MCP_MAX_DIAGN
 export const MAX_DIAGNOSTIC_TEXT_CHARS = readBoundedInteger("CAMOUFOX_MCP_MAX_DIAGNOSTIC_TEXT_CHARS", 2000, 100, 20000);
 export const MAX_SESSIONS = readBoundedInteger("CAMOUFOX_MCP_MAX_SESSIONS", 1, 1, 4);
 export const SESSION_TTL_MS = readBoundedInteger("CAMOUFOX_MCP_SESSION_TTL_MS", 600000, 300000, 900000);
+// Counts every request/response (images, fonts, XHR, websockets...) seen by a browser context
+// for the lifetime of that context, not per navigation. A persistent multi-step SPA session
+// (browse_session_*) shares one context across many pages, so the old hardcoded 1024 tripped
+// mid-form on ordinary sites and permanently blocked the rest of the session (one-way latch,
+// see installRequestGuard) with no way to recover short of starting a new session.
+export const MAX_GUARDED_REQUESTS = readBoundedInteger("CAMOUFOX_MCP_MAX_GUARDED_REQUESTS", 20000, 256, 200000);
 
 export function fileContains(path: string, value: string): boolean {
   try {
