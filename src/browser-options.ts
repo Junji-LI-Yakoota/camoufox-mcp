@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import type { Browser } from "playwright-core";
 import chalk from "chalk";
 import { validateTargetUrl } from "./policy.js";
@@ -135,6 +136,22 @@ export function buildCamoufoxOptions(input: BrowserLaunchInput, selectedOS: Supp
   };
 }
 
+export function loadStorageState(storageStatePath: string | undefined): NonNullable<Parameters<Browser["newContext"]>[0]>["storageState"] {
+  if (!storageStatePath) {
+    return undefined;
+  }
+
+  try {
+    if (!existsSync(storageStatePath)) {
+      return undefined;
+    }
+    return JSON.parse(readFileSync(storageStatePath, "utf8"));
+  } catch (error) {
+    console.error(chalk.yellow(`[Camoufox] Failed to load storage state from ${storageStatePath}: ${describeError(error)}`));
+    return undefined;
+  }
+}
+
 export function browserContextOptions(input: BrowserLaunchInput): Parameters<Browser["newContext"]>[0] {
   return {
     serviceWorkers: "block",
@@ -143,5 +160,6 @@ export function browserContextOptions(input: BrowserLaunchInput): Parameters<Bro
       width: input.viewport.width,
       height: input.viewport.height,
     } : undefined,
+    storageState: loadStorageState(input.storageStatePath),
   };
 }

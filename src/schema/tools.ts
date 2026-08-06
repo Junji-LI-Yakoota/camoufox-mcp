@@ -34,6 +34,7 @@ export const commonBrowserOptionShape = {
   includeNetwork: z.boolean().optional().describe("Include bounded network diagnostics in the JSON response."),
   stealthProfile: stealthProfileSchema,
   captchaPolicy: captchaPolicySchema,
+  storageStatePath: z.string().min(1).max(1000).optional().describe("Absolute local file path to load cookies/localStorage from at launch and save them back to at close. Missing file is treated as a fresh, empty state. Lets a multi-step quote tunnel keep its login/session across a crashed or restarted session instead of starting from a bare new visitor context every time."),
 };
 
 export const commonBrowserToolShape = {
@@ -67,8 +68,8 @@ export const sequenceActionSchema = z.discriminatedUnion("type", [
     type: z.literal("click"),
     selector: z.string().max(2000),
     frame: frameSchema,
-    clickMode: z.enum(["dom", "pointer", "auto"]).optional().default("dom")
-      .describe("Click implementation. 'dom' uses DOM activation for CI stability. 'pointer' uses Playwright pointer input. 'auto' tries pointer first and falls back to DOM activation."),
+    clickMode: z.enum(["dom", "pointer", "auto"]).optional().default("auto")
+      .describe("Click implementation. 'auto' (default) tries a real pointer click first, for a more human/less fingerprintable interaction, and falls back to DOM activation if pointer input isn't stable (e.g. under a headless/CI virtual display). 'pointer' forces real pointer input. 'dom' forces DOM activation only."),
     timeout: actionTimeoutSchema,
   }),
   z.object({
@@ -127,6 +128,19 @@ export const sequenceActionSchema = z.discriminatedUnion("type", [
     expression: z.string().max(4000),
     timeout: actionTimeoutSchema,
     maxChars: z.number().int().min(100).max(MAX_MAX_CHARS).optional().default(DEFAULT_MAX_CHARS),
+  }),
+  z.object({
+    type: z.literal("waitForText"),
+    selector: z.string().max(2000),
+    frame: frameSchema,
+    pattern: z.string().min(1).max(500).describe("Substring to match against the element's text content, or /regex/flags to match with a regular expression. Polls the element until it matches or the timeout elapses. Use after an action that triggers an async price/content recalculation."),
+    timeout: actionTimeoutSchema,
+  }),
+  z.object({
+    type: z.literal("waitForResponse"),
+    urlPattern: z.string().min(1).max(2000).describe("Substring to match against the response URL, or /regex/flags to match with a regular expression."),
+    status: z.number().int().min(100).max(599).optional().describe("Optional expected HTTP status; if omitted, any matching URL response satisfies the wait."),
+    timeout: actionTimeoutSchema,
   }),
 ]);
 
@@ -235,6 +249,21 @@ export const sessionCloseToolShape = {
   ...sessionIdShape,
 };
 
+export const sessionScreenshotToolShape = {
+  ...sessionIdShape,
+  selector: z.string().max(2000).optional().describe("Optional CSS selector for element-only screenshots."),
+  fullPage: z.boolean().optional().default(false).describe("Capture the full page instead of only the viewport."),
+  type: z.enum(["png", "jpeg"]).optional().default("png").describe("Screenshot image type."),
+  quality: z.number().int().min(1).max(100).optional().describe("JPEG quality from 1-100. Ignored for PNG."),
+  savePath: z.string().min(1).max(1000).optional().describe("Absolute local file path to also write the screenshot to on disk."),
+};
+
+export const sessionSaveHtmlToolShape = {
+  ...sessionIdShape,
+  savePath: z.string().min(1).max(1000).describe("Absolute local file path to write the captured HTML to."),
+  inlineStyles: z.boolean().optional().default(true).describe("Replace same-origin <link rel=stylesheet> tags with inlined <style> blocks so the file is readable standalone via file:// or a local static server. Cross-origin stylesheets without CORS headers are left as-is (cannot be read from page context)."),
+};
+
 export type WithWindowSize<T> = Omit<T, "window"> & { window?: WindowSize };
 export type BrowseToolInput = WithWindowSize<z.infer<z.ZodObject<typeof browseToolShape>>>;
 export type SnapshotToolInput = WithWindowSize<z.infer<z.ZodObject<typeof snapshotToolShape>>>;
@@ -253,3 +282,5 @@ export type SessionActionToolInput = z.infer<z.ZodObject<typeof sessionActionToo
 export type SessionSnapshotToolInput = z.infer<z.ZodObject<typeof sessionSnapshotToolShape>>;
 export type SessionResumeToolInput = z.infer<z.ZodObject<typeof sessionResumeToolShape>>;
 export type SessionCloseToolInput = z.infer<z.ZodObject<typeof sessionCloseToolShape>>;
+export type SessionScreenshotToolInput = z.infer<z.ZodObject<typeof sessionScreenshotToolShape>>;
+export type SessionSaveHtmlToolInput = z.infer<z.ZodObject<typeof sessionSaveHtmlToolShape>>;

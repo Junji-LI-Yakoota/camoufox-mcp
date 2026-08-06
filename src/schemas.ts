@@ -3,8 +3,8 @@ export {
   findOutputSchema, formsOutputSchema, linksOutputSchema, networkSummaryOutputSchema, outlineOutputSchema, statusOutputSchema,
 } from "./schema/output.js";
 export {
-  browseToolShape, consoleToolShape, findToolShape, formsToolShape, linksToolShape, networkSummaryToolShape, outlineToolShape, screenshotToolShape, sequenceToolShape, sessionActionToolShape, sessionCloseToolShape, sessionNavigateToolShape, sessionResumeToolShape, sessionSnapshotToolShape, sessionStartToolShape, snapshotToolShape,
+  browseToolShape, consoleToolShape, findToolShape, formsToolShape, linksToolShape, networkSummaryToolShape, outlineToolShape, screenshotToolShape, sequenceToolShape, sessionActionToolShape, sessionCloseToolShape, sessionNavigateToolShape, sessionResumeToolShape, sessionSaveHtmlToolShape, sessionScreenshotToolShape, sessionSnapshotToolShape, sessionStartToolShape, snapshotToolShape,
 } from "./schema/tools.js";
 export type {
-  BrowseToolInput, ConsoleToolInput, FindToolInput, FormsToolInput, LinksToolInput, NetworkSummaryToolInput, OutlineToolInput, ScreenshotToolInput, SequenceAction, SequenceToolInput, SessionActionToolInput, SessionCloseToolInput, SessionNavigateToolInput, SessionResumeToolInput, SessionSnapshotToolInput, SessionStartToolInput, SnapshotToolInput,
+  BrowseToolInput, ConsoleToolInput, FindToolInput, FormsToolInput, LinksToolInput, NetworkSummaryToolInput, OutlineToolInput, ScreenshotToolInput, SequenceAction, SequenceToolInput, SessionActionToolInput, SessionCloseToolInput, SessionNavigateToolInput, SessionResumeToolInput, SessionSaveHtmlToolInput, SessionScreenshotToolInput, SessionSnapshotToolInput, SessionStartToolInput, SnapshotToolInput,
 } from "./schema/tools.js";

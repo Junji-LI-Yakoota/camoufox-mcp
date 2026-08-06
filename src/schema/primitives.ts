@@ -45,6 +45,7 @@ export const screenshotOptionsSchema = z.object({
   selector: z.string().max(2000).optional().describe("Optional CSS selector for element-only screenshots."),
   type: z.enum(["png", "jpeg"]).optional().default("png").describe("Screenshot image type."),
   quality: z.number().int().min(1).max(100).optional().describe("JPEG quality from 1-100. Ignored for PNG."),
+  savePath: z.string().min(1).max(1000).optional().describe("Absolute local file path to also write the screenshot to on disk. Saved independently of the byte limit applied to the inline base64 response, so large full-page captures are not lost when they exceed that limit."),
 }).optional().describe("Optional screenshot capture settings. Used only when screenshot is true.");
 
 export const stealthProfileSchema = z.enum(["normal", "privacy", "human_assisted", "fast", "debug"]).optional().default(DEFAULT_STEALTH_PROFILE)

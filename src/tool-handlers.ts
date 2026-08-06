@@ -102,6 +102,7 @@ export async function handleBrowse(input: BrowseToolInput) {
       diagnostics,
       selectedOS,
       waitStrategy,
+      downloads,
     }) => {
       const mode = effectiveInput.outputMode ?? "text";
       const charLimit = effectiveInput.maxChars ?? DEFAULT_MAX_CHARS;
@@ -115,6 +116,8 @@ export async function handleBrowse(input: BrowseToolInput) {
         return buildToolError(`Blocked unsafe browser request to ${safeUrl}.`);
       }
 
+      payload.downloads = downloads;
+      payload.blockedSubresources = requestGuard.getBlockedSubresources();
       appendDiagnostics(payload, diagnostics.payload());
 
       let screenshotResult: ScreenshotResult | undefined;
@@ -206,6 +209,7 @@ export async function handleSequence(input: SequenceToolInput) {
       requestGuard,
       diagnostics,
       getLastNavigationResponse,
+      downloads,
     }) => {
       const rawUrls = [effectiveInput.url, getProxyServer(effectiveInput.proxy)].filter((rawUrl): rawUrl is string => Boolean(rawUrl));
       const secrets = getProxySecrets(effectiveInput.proxy);
@@ -252,6 +256,8 @@ export async function handleSequence(input: SequenceToolInput) {
         selectorFound: contentPayload.selectorFound,
         text: contentPayload.text,
         html: contentPayload.html,
+        downloads,
+        blockedSubresources: requestGuard.getBlockedSubresources(),
       };
 
       appendDiagnostics(payload, diagnostics.payload());

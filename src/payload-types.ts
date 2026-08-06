@@ -12,6 +12,7 @@ export interface ScreenshotOptions {
   selector?: string;
   type?: ScreenshotImageType;
   quality?: number;
+  savePath?: string;
 }
 
 export interface ScreenshotMetadata {
@@ -24,6 +25,8 @@ export interface ScreenshotMetadata {
   selector?: string;
   selectorFound?: boolean;
   error?: string;
+  savedPath?: string;
+  saveError?: string;
 }
 
 export interface ConsoleDiagnostic {
@@ -87,6 +90,13 @@ export interface PendingBrowse {
   timer: ReturnType<typeof setTimeout>;
 }
 
+export interface DownloadRecordPayload {
+  path: string;
+  suggestedFilename: string;
+  bytes: number;
+  savedAt: number;
+}
+
 export interface BrowsePayload {
   url: string;
   title?: string;
@@ -101,6 +111,8 @@ export interface BrowsePayload {
   html?: string;
   screenshot?: ScreenshotMetadata;
   diagnostics?: DiagnosticsPayload;
+  downloads?: DownloadRecordPayload[];
+  blockedSubresources?: string[];
 }
 
 export interface SnapshotElement {
@@ -163,6 +175,8 @@ export interface SequencePayload {
   html?: string;
   screenshot?: ScreenshotMetadata;
   diagnostics?: DiagnosticsPayload;
+  downloads?: DownloadRecordPayload[];
+  blockedSubresources?: string[];
 }
 
 export interface LinkEntry {

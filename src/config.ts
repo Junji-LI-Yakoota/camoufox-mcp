@@ -86,13 +86,41 @@ export const MAX_SCREENSHOT_AREA = MAX_SCREENSHOT_WIDTH * MAX_SCREENSHOT_HEIGHT;
 export const MAX_DIAGNOSTIC_ENTRIES = readBoundedInteger("CAMOUFOX_MCP_MAX_DIAGNOSTIC_ENTRIES", 100, 1, 1000);
 export const MAX_DIAGNOSTIC_TEXT_CHARS = readBoundedInteger("CAMOUFOX_MCP_MAX_DIAGNOSTIC_TEXT_CHARS", 2000, 100, 20000);
 export const MAX_SESSIONS = readBoundedInteger("CAMOUFOX_MCP_MAX_SESSIONS", 1, 1, 4);
-export const SESSION_TTL_MS = readBoundedInteger("CAMOUFOX_MCP_SESSION_TTL_MS", 600000, 300000, 900000);
+// Max raised from 1h to 8h: supervised multi-step quote tunnels routinely need a human to clear a
+// CAPTCHA, a native save dialog, or another blocking step mid-run; the TTL is idle-reset per
+// getSession() call, so this bounds worst-case idle time, not total session length.
+export const SESSION_TTL_MS = readBoundedInteger("CAMOUFOX_MCP_SESSION_TTL_MS", 1800000, 300000, 28800000);
 // Counts every request/response (images, fonts, XHR, websockets...) seen by a browser context
 // for the lifetime of that context, not per navigation. A persistent multi-step SPA session
 // (browse_session_*) shares one context across many pages, so the old hardcoded 1024 tripped
 // mid-form on ordinary sites and permanently blocked the rest of the session (one-way latch,
 // see installRequestGuard) with no way to recover short of starting a new session.
 export const MAX_GUARDED_REQUESTS = readBoundedInteger("CAMOUFOX_MCP_MAX_GUARDED_REQUESTS", 20000, 256, 200000);
+export const MAX_BLOCKED_SUBRESOURCE_LOG = 50;
+
+// Off by default (no behavior change for existing callers). Set e.g. "800-3000" to add a random
+// human-like pause before each interactive action, on sites that fingerprint click cadence.
+export function readJitterRangeMs(name: string, defaultMin: number, defaultMax: number): [number, number] {
+  const raw = process.env[name];
+  if (!raw) {
+    return [defaultMin, defaultMax];
+  }
+
+  const match = raw.match(/^\s*(\d+)\s*-\s*(\d+)\s*$/);
+  if (!match) {
+    return [defaultMin, defaultMax];
+  }
+
+  const min = Number.parseInt(match[1], 10);
+  const max = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) {
+    return [defaultMin, defaultMax];
+  }
+
+  return [Math.max(0, Math.min(min, 10000)), Math.max(0, Math.min(max, 10000))];
+}
+
+export const ACTION_JITTER_RANGE_MS = readJitterRangeMs("CAMOUFOX_MCP_ACTION_JITTER_MS", 0, 0);
 
 export function fileContains(path: string, value: string): boolean {
   try {

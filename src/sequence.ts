@@ -1,10 +1,43 @@
 import type { Locator, Page } from "playwright-core";
 import chalk from "chalk";
-import { ALLOW_EVALUATE, DEFAULT_ACTION_TIMEOUT_MS, SEQUENCE_TIMEOUT_MS } from "./config.js";
+import { ACTION_JITTER_RANGE_MS, ALLOW_EVALUATE, DEFAULT_ACTION_TIMEOUT_MS, SEQUENCE_TIMEOUT_MS } from "./config.js";
 import type { SequenceAction } from "./schemas.js";
 import type { ClickMode, RequestGuard, SequenceActionResult } from "./types.js";
 import { describeError, serializeBounded, withTimeout } from "./utils.js";
 import { settleAndAssertSafe } from "./browser-runtime.js";
+
+// Best-effort human-like approach to an element before acting on it: move it into view and give
+// it focus, the way a real user would before clicking or typing. Non-fatal — some clickable
+// elements (e.g. a styled <div role="button">) aren't focusable, and Playwright's own
+// actionability checks inside click()/fill()/etc. still run and enforce the real precondition.
+export async function scrollAndFocus(locator: Locator, timeout: number): Promise<void> {
+  await locator.scrollIntoViewIfNeeded({ timeout }).catch(() => undefined);
+  await locator.focus({ timeout }).catch(() => undefined);
+}
+
+function randomInt(min: number, max: number): number {
+  if (max <= min) return min;
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+// Off by default (see config.ts ACTION_JITTER_RANGE_MS). When enabled via
+// CAMOUFOX_MCP_ACTION_JITTER_MS, adds a randomized human-like pause before each interactive
+// action so click/type cadence doesn't look scripted (fixed ~100ms gaps between actions were
+// part of what tripped the lesfurets "vitesse surhumaine" rate block, see anti_bot_log.md).
+async function applyActionJitter(page: Page): Promise<void> {
+  const [min, max] = ACTION_JITTER_RANGE_MS;
+  if (max <= 0) return;
+  await page.waitForTimeout(randomInt(min, max));
+}
+
+function toTextMatcher(pattern: string): (value: string) => boolean {
+  const regexMatch = pattern.match(/^\/(.*)\/([a-z]*)$/i);
+  if (regexMatch) {
+    const regex = new RegExp(regexMatch[1], regexMatch[2]);
+    return (value) => regex.test(value);
+  }
+  return (value) => value.includes(pattern);
+}
 
 export function actionTimeout(action: { timeout?: number }): number {
   return action.timeout ?? DEFAULT_ACTION_TIMEOUT_MS;
@@ -50,9 +83,11 @@ export async function domClick(locator: Locator, timeout: number): Promise<void>
   );
 }
 
-export async function activateElement(page: Page, selector: string, timeout: number, frame?: string, clickMode: ClickMode = "dom"): Promise<void> {
+export async function activateElement(page: Page, selector: string, timeout: number, frame?: string, clickMode: ClickMode = "auto"): Promise<void> {
   const locator = resolveLocator(page, selector, frame);
   await locator.waitFor({ state: "visible", timeout });
+  await scrollAndFocus(locator, timeout);
+  await applyActionJitter(page);
   if (!await locator.isEnabled({ timeout })) {
     throw new Error(`Click selector is disabled: ${selector}`);
   }
@@ -89,29 +124,49 @@ export async function runSequenceAction(
       await activateElement(page, action.selector, timeout, action.frame, action.clickMode);
       return { index, type: action.type, selector: action.selector, status: "ok", durationMs: Date.now() - started };
 
-    case "hover":
-      await resolveLocator(page, action.selector, action.frame).hover({ timeout });
+    case "hover": {
+      const locator = resolveLocator(page, action.selector, action.frame);
+      await scrollAndFocus(locator, timeout);
+      await applyActionJitter(page);
+      await locator.hover({ timeout });
       return { index, type: action.type, selector: action.selector, status: "ok", durationMs: Date.now() - started };
+    }
 
-    case "fill":
-      await resolveLocator(page, action.selector, action.frame).fill(action.value, { timeout });
+    case "fill": {
+      const locator = resolveLocator(page, action.selector, action.frame);
+      await scrollAndFocus(locator, timeout);
+      await applyActionJitter(page);
+      await locator.fill(action.value, { timeout });
       return { index, type: action.type, selector: action.selector, status: "ok", durationMs: Date.now() - started };
+    }
 
-    case "type":
-      await resolveLocator(page, action.selector, action.frame).pressSequentially(action.text, {
+    case "type": {
+      const locator = resolveLocator(page, action.selector, action.frame);
+      await scrollAndFocus(locator, timeout);
+      await applyActionJitter(page);
+      await locator.pressSequentially(action.text, {
         delay: action.delay,
         timeout,
       });
       return { index, type: action.type, selector: action.selector, status: "ok", durationMs: Date.now() - started };
+    }
 
-    case "select":
-      await resolveLocator(page, action.selector, action.frame).selectOption(action.value, { timeout });
+    case "select": {
+      const locator = resolveLocator(page, action.selector, action.frame);
+      await scrollAndFocus(locator, timeout);
+      await applyActionJitter(page);
+      await locator.selectOption(action.value, { timeout });
       return { index, type: action.type, selector: action.selector, status: "ok", durationMs: Date.now() - started };
+    }
 
     case "press":
       if (action.selector) {
-        await resolveLocator(page, action.selector, action.frame).press(action.key, { timeout });
+        const locator = resolveLocator(page, action.selector, action.frame);
+        await scrollAndFocus(locator, timeout);
+        await applyActionJitter(page);
+        await locator.press(action.key, { timeout });
       } else {
+        await applyActionJitter(page);
         await withTimeout(page.keyboard.press(action.key), timeout, "Press action");
       }
       return { index, type: action.type, selector: action.selector, status: "ok", durationMs: Date.now() - started };
@@ -182,6 +237,38 @@ export async function runSequenceAction(
         resultTruncated: serialized.truncated,
         durationMs: Date.now() - started,
       };
+    }
+
+    case "waitForText": {
+      const locator = resolveLocator(page, action.selector, action.frame);
+      const matcher = toTextMatcher(action.pattern);
+      await withTimeout(
+        (async () => {
+          for (;;) {
+            const text = await locator.textContent().catch(() => null);
+            if (text !== null && matcher(text)) {
+              return;
+            }
+            await page.waitForTimeout(150);
+          }
+        })(),
+        timeout,
+        "WaitForText action",
+      );
+      return { index, type: action.type, selector: action.selector, status: "ok", durationMs: Date.now() - started };
+    }
+
+    case "waitForResponse": {
+      const matcher = toTextMatcher(action.urlPattern);
+      await withTimeout(
+        page.waitForResponse(
+          (response) => matcher(response.url()) && (action.status === undefined || response.status() === action.status),
+          { timeout },
+        ),
+        timeout,
+        "WaitForResponse action",
+      );
+      return { index, type: action.type, status: "ok", durationMs: Date.now() - started };
     }
   }
 }

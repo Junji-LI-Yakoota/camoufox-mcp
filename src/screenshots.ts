@@ -1,8 +1,22 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { Page } from "playwright-core";
 import chalk from "chalk";
 import { MAX_SCREENSHOT_AREA, MAX_SCREENSHOT_BYTES, MAX_SCREENSHOT_HEIGHT, MAX_SCREENSHOT_WIDTH } from "./config.js";
 import type { ScreenshotMetadata, ScreenshotOptions, ScreenshotResult, WindowSize } from "./types.js";
 import { describeError } from "./utils.js";
+
+async function saveScreenshotToDisk(buffer: Buffer, savePath: string, metadata: ScreenshotMetadata): Promise<void> {
+  try {
+    await mkdir(path.dirname(savePath), { recursive: true });
+    await writeFile(savePath, buffer);
+    metadata.savedPath = savePath;
+    console.error(chalk.green(`[Camoufox] Screenshot saved to ${savePath}.`));
+  } catch (saveError) {
+    metadata.saveError = describeError(saveError);
+    console.error(chalk.yellow(`[Camoufox] Screenshot save failed: ${metadata.saveError}`));
+  }
+}
 
 export function isScreenshotDimensionAllowed(viewport?: { width: number; height: number }, window?: WindowSize): boolean {
   const width = viewport?.width ?? window?.[0] ?? MAX_SCREENSHOT_WIDTH;
@@ -115,6 +129,13 @@ export async function captureScreenshot(page: Page, safeUrl: string, options?: S
     }
 
     screenshotMetadata.bytes = buffer.length;
+
+    if (options?.savePath) {
+      // Save to disk regardless of the inline byte limit below: a full-page capture that's too
+      // big to return as base64 in the tool response is still exactly what a scrape run wants on
+      // disk for later human/offline review.
+      await saveScreenshotToDisk(buffer, options.savePath, screenshotMetadata);
+    }
 
     if (buffer.length > MAX_SCREENSHOT_BYTES) {
       screenshotMetadata.error = "Screenshot exceeded server byte limit.";

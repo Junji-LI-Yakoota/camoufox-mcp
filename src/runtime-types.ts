@@ -14,6 +14,14 @@ export type ProxyConfig = string | { server: string; username?: string; password
 export interface RequestGuard {
   assertAllowed(): void;
   watchPage(page: Page): void;
+  getBlockedSubresources(): string[];
+}
+
+export interface DownloadRecord {
+  path: string;
+  suggestedFilename: string;
+  bytes: number;
+  savedAt: number;
 }
 
 export interface SessionRecord {
@@ -35,6 +43,8 @@ export interface SessionRecord {
   op: Promise<void>;
   closing: boolean;
   closed: boolean;
+  downloads: DownloadRecord[];
+  storageStatePath?: string;
 }
 
 export interface CamoufoxOptions {
@@ -80,6 +90,7 @@ export interface BrowserLaunchInput {
   includeNetwork?: boolean;
   stealthProfile?: StealthProfile;
   captchaPolicy?: CaptchaPolicy;
+  storageStatePath?: string;
 }
 
 export interface ExtractedContent {
@@ -106,6 +117,7 @@ export interface BrowserOperationContext {
   selectedOS: SupportedOs;
   waitStrategy: WaitStrategy;
   getLastNavigationResponse: () => Response | null;
+  downloads: DownloadRecord[];
 }
 
 export interface DiagnosticsCollector {

@@ -1,16 +1,16 @@
 import { randomUUID } from "node:crypto";
-import path from "node:path";
-import os from "node:os";
 import type { Browser, Response } from "playwright-core";
 import chalk from "chalk";
 import { validateTargetUrl } from "./policy.js";
 import { DEFAULT_ACTION_TIMEOUT_MS, DEFAULT_MAX_CHARS, DEFAULT_MAX_ELEMENTS, DEFAULT_WAIT_STRATEGY, MAX_SESSIONS, SESSION_CLOSE_GRACE_MS, SESSION_TTL_MS } from "./config.js";
-import type { SessionRecord, SlotRelease, WaitStrategy } from "./types.js";
-import type { SessionActionToolInput, SessionCloseToolInput, SessionNavigateToolInput, SessionResumeToolInput, SessionSnapshotToolInput, SessionStartToolInput } from "./schemas.js";
-import { acquireBrowserSlot, browserContextOptions, buildCamoufoxOptions, closeBrowser, installRequestGuard, launchCamoufoxBrowser, runGuardedPageRead, settleAndAssertSafe, trackBrowser, validateBrowserOptionsInput } from "./browser-runtime.js";
+import type { DownloadRecord, SessionRecord, SlotRelease, WaitStrategy } from "./types.js";
+import type { SessionActionToolInput, SessionCloseToolInput, SessionNavigateToolInput, SessionResumeToolInput, SessionSaveHtmlToolInput, SessionScreenshotToolInput, SessionSnapshotToolInput, SessionStartToolInput } from "./schemas.js";
+import { acquireBrowserSlot, attachDownloadTracking, attachPopupDownloadTracking, browserContextOptions, buildCamoufoxOptions, closeBrowser, installRequestGuard, launchCamoufoxBrowser, runGuardedPageRead, saveStorageStateIfConfigured, settleAndAssertSafe, trackBrowser, validateBrowserOptionsInput } from "./browser-runtime.js";
 import { createDiagnosticsCollector } from "./diagnostics.js";
 import { buildBrowsePayload, buildSnapshotPayload } from "./extractors.js";
 import { maybeDetectCaptcha } from "./captcha.js";
+import { captureSessionHtml } from "./html-capture.js";
+import { captureScreenshot } from "./screenshots.js";
 import { buildSuccessContent, buildToolError } from "./responses.js";
 import { isLocalOperationTimeout, runSequenceAction } from "./sequence.js";
 import { applyStealthProfile, defaultHeadlessMode, describeError, getProxySecrets, getProxyServer, redactUrl, sanitizeErrorMessage, selectOperatingSystem } from "./utils.js";
@@ -56,6 +56,7 @@ export async function closeSessionNow(session: SessionRecord, reason: string): P
   clearTimeout(session.timer);
   console.error(chalk.blue(`[Camoufox] Closing session ${session.id} (${reason}).`));
   try {
+    await saveStorageStateIfConfigured(session.context, session.storageStatePath);
     await closeBrowser(session.browser);
   } finally {
     session.releaseSlot();
@@ -191,16 +192,9 @@ export async function handleSessionStart(input: SessionStartToolInput) {
     const page = await context.newPage();
     requestGuard.watchPage(page);
 
-    const downloadDir = process.env.CAMOUFOX_MCP_DOWNLOAD_DIR || path.join(os.homedir(), "Downloads");
-    page.on("download", async (download) => {
-      try {
-        const dest = path.join(downloadDir, download.suggestedFilename());
-        await download.saveAs(dest);
-        console.error(chalk.green(`[Camoufox] Download saved: ${dest}`));
-      } catch (downloadError) {
-        console.error(chalk.red(`[Camoufox] Download save failed: ${describeError(downloadError)}`));
-      }
-    });
+    const downloads: DownloadRecord[] = [];
+    attachDownloadTracking(page, downloads);
+    attachPopupDownloadTracking(context, downloads);
 
     const id = `sess_${randomUUID()}`;
     const rawUrls = [getProxyServer(effectiveInput.proxy)].filter((rawUrl): rawUrl is string => Boolean(rawUrl));
@@ -227,6 +221,8 @@ export async function handleSessionStart(input: SessionStartToolInput) {
       op: Promise.resolve(),
       closing: false,
       closed: false,
+      downloads,
+      storageStatePath: effectiveInput.storageStatePath,
     };
 
     sessions.set(id, session);
@@ -280,7 +276,13 @@ export async function buildSessionSnapshotResult(
       input.selector,
     ),
   );
-  const basePayload = { sessionId: session.id, expiresAt: sessionExpiresAt(session), ...snapshot };
+  const basePayload = {
+    sessionId: session.id,
+    expiresAt: sessionExpiresAt(session),
+    ...snapshot,
+    downloads: session.downloads,
+    blockedSubresources: session.requestGuard.getBlockedSubresources(),
+  };
   if (input.captchaPolicy) {
     const { mergedPayload, captchaScreenshot } = await maybeDetectCaptcha(
       session.page,
@@ -308,7 +310,13 @@ export async function handleSessionNavigate(input: SessionNavigateToolInput) {
         currentSession.requestGuard,
         () => buildBrowsePayload(currentSession.page, response, mode, charLimit, input.selector),
       );
-      const basePayload = { sessionId: currentSession.id, expiresAt: sessionExpiresAt(currentSession), ...payload };
+      const basePayload = {
+        sessionId: currentSession.id,
+        expiresAt: sessionExpiresAt(currentSession),
+        ...payload,
+        downloads: currentSession.downloads,
+        blockedSubresources: currentSession.requestGuard.getBlockedSubresources(),
+      };
       if (input.captchaPolicy) {
         const { mergedPayload, captchaScreenshot } = await maybeDetectCaptcha(currentSession.page, response, basePayload, input.captchaPolicy, redactUrl(input.url));
         return buildSuccessContent(mergedPayload, captchaScreenshot);
@@ -339,7 +347,14 @@ export async function handleSessionAction(input: SessionActionToolInput) {
           input.selector,
         ),
       );
-      const basePayload = { sessionId: currentSession.id, expiresAt: sessionExpiresAt(currentSession), action: actionResult, snapshot };
+      const basePayload = {
+        sessionId: currentSession.id,
+        expiresAt: sessionExpiresAt(currentSession),
+        action: actionResult,
+        snapshot,
+        downloads: currentSession.downloads,
+        blockedSubresources: currentSession.requestGuard.getBlockedSubresources(),
+      };
       if (input.captchaPolicy) {
         const { mergedPayload, captchaScreenshot } = await maybeDetectCaptcha(currentSession.page, currentSession.lastNavigationResponse, basePayload, input.captchaPolicy, redactUrl(currentSession.page.url()));
         return buildSuccessContent(mergedPayload, captchaScreenshot);
@@ -385,4 +400,47 @@ export async function handleSessionClose(input: SessionCloseToolInput) {
     sessionId: input.sessionId,
     closed,
   });
+}
+
+export async function handleSessionScreenshot(input: SessionScreenshotToolInput) {
+  let session: SessionRecord | undefined;
+  try {
+    const currentSession = await getSession(input.sessionId);
+    session = currentSession;
+    return await runSessionExclusive(currentSession, async () => {
+      const screenshotResult = await captureScreenshot(currentSession.page, redactUrl(currentSession.page.url()), {
+        fullPage: input.fullPage,
+        selector: input.selector,
+        type: input.type,
+        quality: input.quality,
+        savePath: input.savePath,
+      });
+      const payload = {
+        sessionId: currentSession.id,
+        expiresAt: sessionExpiresAt(currentSession),
+        screenshot: screenshotResult.screenshotMetadata,
+      };
+      return buildSuccessContent(payload, screenshotResult);
+    });
+  } catch (error) {
+    return buildToolError(`Failed to capture session screenshot. Error: ${sessionSanitizedError(error, session)}`);
+  }
+}
+
+export async function handleSessionSaveHtml(input: SessionSaveHtmlToolInput) {
+  let session: SessionRecord | undefined;
+  try {
+    const currentSession = await getSession(input.sessionId);
+    session = currentSession;
+    return await runSessionExclusive(currentSession, async () => {
+      const result = await captureSessionHtml(currentSession.page, input.savePath, input.inlineStyles);
+      return buildSuccessContent({
+        sessionId: currentSession.id,
+        expiresAt: sessionExpiresAt(currentSession),
+        ...result,
+      });
+    });
+  } catch (error) {
+    return buildToolError(`Failed to save session HTML. Error: ${sessionSanitizedError(error, session)}`);
+  }
 }
