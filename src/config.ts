@@ -98,8 +98,11 @@ export const SESSION_TTL_MS = readBoundedInteger("CAMOUFOX_MCP_SESSION_TTL_MS", 
 export const MAX_GUARDED_REQUESTS = readBoundedInteger("CAMOUFOX_MCP_MAX_GUARDED_REQUESTS", 20000, 256, 200000);
 export const MAX_BLOCKED_SUBRESOURCE_LOG = 50;
 
-// Off by default (no behavior change for existing callers). Set e.g. "800-3000" to add a random
-// human-like pause before each interactive action, on sites that fingerprint click cadence.
+// On by default: 400-1200ms before each interactive action. Fixed ~100ms gaps between actions
+// were part of what tripped the lesfurets "vitesse surhumaine" rate block (anti_bot_log.md); this
+// range reads as human pacing without meaningfully slowing a normal <=25-action sequence against
+// the 120s SEQUENCE_TIMEOUT_MS budget. Raise it (e.g. "800-3000") for sites that fingerprint click
+// cadence more aggressively, or set "0-0" to disable.
 export function readJitterRangeMs(name: string, defaultMin: number, defaultMax: number): [number, number] {
   const raw = process.env[name];
   if (!raw) {
@@ -120,7 +123,7 @@ export function readJitterRangeMs(name: string, defaultMin: number, defaultMax: 
   return [Math.max(0, Math.min(min, 10000)), Math.max(0, Math.min(max, 10000))];
 }
 
-export const ACTION_JITTER_RANGE_MS = readJitterRangeMs("CAMOUFOX_MCP_ACTION_JITTER_MS", 0, 0);
+export const ACTION_JITTER_RANGE_MS = readJitterRangeMs("CAMOUFOX_MCP_ACTION_JITTER_MS", 400, 1200);
 
 export function fileContains(path: string, value: string): boolean {
   try {
